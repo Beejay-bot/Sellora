@@ -18,6 +18,7 @@ export const orderItemSchema = z.object({
 
 export const orderSchema = z.object({
   orderId: z.string().min(3),
+  merchantId: z.string().optional(),
   customerName: z.string().min(2),
   customerPhone: z.string().min(7),
   items: z.array(orderItemSchema).min(1),
@@ -30,6 +31,7 @@ export const orderSchema = z.object({
 });
 
 export const createOrderInputSchema = z.object({
+  merchantId: z.string().optional(),
   customerName: z.string().min(2),
   customerPhone: z.string().min(7),
   lines: z
@@ -44,4 +46,4 @@ export const createOrderInputSchema = z.object({
 
 export type Order = z.infer<typeof orderSchema>;
 export type OrderItem = z.infer<typeof orderItemSchema>;
-export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
+export type CreateOrderInput = z.input<typeof createOrderInputSchema>;

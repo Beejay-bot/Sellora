@@ -25,12 +25,11 @@ describe("PersistentStorage (SQLite)", () => {
     }
   });
 
-  it("initializes with seed data when SQLite DB file does not exist", async () => {
+  it("initializes with empty catalogue when SQLite DB file does not exist", async () => {
     const storage = new PersistentStorage(testFile);
     const products = await storage.getProducts();
 
-    expect(products.length).toBeGreaterThanOrEqual(3);
-    expect(products[0].productId).toBe("wigs-bone-straight-18-inch");
+    expect(products.length).toBe(0);
 
     // Verify DB file was created and written to disk
     const stat = await fs.stat(testFile);

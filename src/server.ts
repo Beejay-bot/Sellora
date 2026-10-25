@@ -1,5 +1,5 @@
 import http, { IncomingMessage, ServerResponse } from "node:http";
-import { defaultStorage, PersistentStorage } from "./services/storage.js";
+import { defaultStorage, normalizeMerchantId, PersistentStorage } from "./services/storage.js";
 import { handleGetCatalogue, handleUpsertProduct } from "./tools/products.js";
 import { handleGenerateStatusCaptions, handleManageCampaign, handleSaveCampaign } from "./tools/campaigns.js";
 import { handleCreateOrder, handleGetOrder } from "./tools/orders.js";
@@ -46,7 +46,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key"
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Merchant-Id"
   });
   res.end(JSON.stringify(data, null, 2));
 }
@@ -55,6 +55,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: any) {
 const upsertProductSchema = {
   type: "object",
   properties: {
+    merchantId: { type: "string", description: "Store or owner handle. Isolates catalogue per store." },
     name: { type: "string", description: "Product name (e.g. 'Bone Straight Wig')" },
     category: { type: "string", description: "Category (e.g. 'wigs', 'skincare', 'makeup')" },
     description: { type: "string", description: "Product description or benefit highlights" },
@@ -69,6 +70,7 @@ const upsertProductSchema = {
 const manageCampaignSchema = {
   type: "object",
   properties: {
+    merchantId: { type: "string", description: "Store or owner handle." },
     action: {
       type: "string",
       enum: ["get_catalogue", "generate_captions", "save_campaign"],
@@ -93,12 +95,15 @@ const manageCampaignSchema = {
 
 const getCatalogueSchema = {
   type: "object",
-  properties: {}
+  properties: {
+    merchantId: { type: "string", description: "Store or owner handle. Retrieves only this merchant's catalogue." }
+  }
 };
 
 const createOrderSchema = {
   type: "object",
   properties: {
+    merchantId: { type: "string", description: "Store or owner handle." },
     customerName: { type: "string", description: "Customer's full name" },
     customerPhone: { type: "string", description: "Customer's WhatsApp contact phone number" },
     lines: {
@@ -139,6 +144,7 @@ const verifyPaymentSchema = {
 const checkoutSchema = {
   type: "object",
   properties: {
+    merchantId: { type: "string", description: "Store or owner handle. Isolates catalogue and order." },
     customerName: { type: "string", description: "Customer's full name" },
     customerPhone: { type: "string", description: "Customer's WhatsApp contact phone number" },
     customerEmail: { type: "string", description: "Customer email for receipt & Paystack checkout link" },
@@ -201,9 +207,10 @@ export const TOOL_DEFINITIONS = [
   }
 ];
 
-export async function handleCheckout(args: any, storage: PersistentStorage = defaultStorage) {
+export async function handleCheckout(args: any, storage: PersistentStorage = defaultStorage, defaultMerchantId?: string) {
   try {
-    const { customerName, customerPhone, customerEmail, productId, quantity = 1, lines } = args || {};
+    const { customerName, customerPhone, customerEmail, productId, quantity = 1, lines, merchantId: rawMerchantId } = args || {};
+    const merchantId = normalizeMerchantId(rawMerchantId || defaultMerchantId);
 
     if (!customerName || !customerPhone || !customerEmail) {
       return {
@@ -225,11 +232,13 @@ export async function handleCheckout(args: any, storage: PersistentStorage = def
 
     const orderResult = await handleCreateOrder(
       {
+        merchantId,
         customerName,
         customerPhone,
         lines: orderLines
       },
-      storage
+      storage,
+      merchantId
     );
 
     if (!orderResult.success || !orderResult.data?.order) {
@@ -249,6 +258,7 @@ export async function handleCheckout(args: any, storage: PersistentStorage = def
     if (!paymentResult.success || !paymentResult.data) {
       return {
         success: true,
+        merchantId,
         orderId: order.orderId,
         totalNgn: order.totalNgn,
         status: "pending_payment",
@@ -258,6 +268,7 @@ export async function handleCheckout(args: any, storage: PersistentStorage = def
 
     return {
       success: true,
+      merchantId,
       orderId: order.orderId,
       customerName: order.customerName,
       items: order.items,
@@ -276,24 +287,25 @@ export async function handleCheckout(args: any, storage: PersistentStorage = def
   }
 }
 
-export async function executeTool(name: string, args: any, storage: PersistentStorage = defaultStorage) {
+export async function executeTool(name: string, args: any, storage: PersistentStorage = defaultStorage, defaultMerchantId?: string) {
+  const merchantId = normalizeMerchantId(args?.merchantId || defaultMerchantId);
   switch (name) {
     case "checkout":
-      return await handleCheckout(args, storage);
+      return await handleCheckout(args, storage, merchantId);
     case "upsert_product":
-      return await handleUpsertProduct(args, storage);
+      return await handleUpsertProduct(args, storage, merchantId);
     case "get_catalogue":
-      return await handleGetCatalogue(storage);
+      return await handleGetCatalogue(storage, merchantId);
     case "manage_campaign":
-      return await handleManageCampaign(args, storage);
+      return await handleManageCampaign(args, storage, merchantId);
     case "generate_captions":
-      return await handleGenerateStatusCaptions(args, storage);
+      return await handleGenerateStatusCaptions(args, storage, merchantId);
     case "save_campaign":
-      return await handleSaveCampaign(args, storage);
+      return await handleSaveCampaign(args, storage, merchantId);
     case "create_order":
-      return await handleCreateOrder(args, storage);
+      return await handleCreateOrder(args, storage, merchantId);
     case "get_order":
-      return await handleGetOrder(args?.orderId, storage);
+      return await handleGetOrder(args?.orderId, storage, merchantId);
     case "initialize_payment":
       return await handleInitializePayment(args, storage);
     case "verify_payment":
@@ -312,7 +324,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
       res.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key"
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Merchant-Id"
       });
       res.end();
       return;
@@ -320,6 +332,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
 
     const parsedUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = parsedUrl.pathname;
+    const reqMerchant = (req.headers["x-merchant-id"] as string) || parsedUrl.searchParams.get("merchantId") || undefined;
 
     const toolToken = process.env.CHORD_TOOL_TOKEN;
     if (toolToken) {
@@ -339,12 +352,13 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
 
     try {
       if ((req.method === "GET" || req.method === "POST") && (pathname === "/" || pathname === "/health")) {
-        const products = await storage.getProducts();
+        const products = await storage.getProducts(reqMerchant || "default");
         sendJson(res, 200, {
           status: "ok",
           latency_ms: 1,
           service: "Sellora Tool Server",
           version: "0.1.0",
+          merchantId: normalizeMerchantId(reqMerchant),
           catalogueCount: products.length,
           timestamp: new Date().toISOString()
         });
@@ -405,7 +419,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
 
         if (method === "tools/call") {
           const { name, arguments: toolArgs } = params;
-          const result = await executeTool(name, toolArgs, storage);
+          const result = await executeTool(name, toolArgs, storage, reqMerchant);
           sendJson(res, 200, {
             jsonrpc,
             id,
@@ -442,6 +456,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
               description: tool.description,
               schema: tool.input_schema,
               sampleBody: tool.name === "checkout" ? {
+                merchantId: "jola",
                 customerName: "Chioma Obi",
                 customerPhone: "08012345678",
                 customerEmail: "chioma@example.com",
@@ -455,7 +470,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
 
         if (req.method === "POST") {
           const body = await parseJsonBody(req);
-          const result = await executeTool(toolName, body, storage);
+          const result = await executeTool(toolName, body, storage, reqMerchant);
           sendJson(res, result.success ? 200 : 400, result);
           return;
         }
@@ -472,7 +487,7 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
       }
 
       if (req.method === "GET" && pathname === "/catalogue") {
-        const result = await handleGetCatalogue(storage);
+        const result = await handleGetCatalogue(storage, reqMerchant);
         sendJson(res, 200, result);
         return;
       }

@@ -1,14 +1,22 @@
 import { createOrder } from "../domain/orders.js";
 import { createOrderInputSchema, type CreateOrderInput } from "../schemas/order.js";
-import { defaultStorage, PersistentStorage } from "../services/storage.js";
+import { defaultStorage, normalizeMerchantId, PersistentStorage } from "../services/storage.js";
 import type { ToolResult } from "./products.js";
 
 export async function handleCreateOrder(
   input: unknown,
-  storage: PersistentStorage = defaultStorage
+  storage: PersistentStorage = defaultStorage,
+  defaultMerchantId?: string
 ): Promise<ToolResult> {
   try {
-    const parsed = createOrderInputSchema.safeParse(input);
+    const rawInput = typeof input === "object" && input !== null ? input : {};
+    const merchantId = normalizeMerchantId((rawInput as any).merchantId || defaultMerchantId);
+
+    const parsed = createOrderInputSchema.safeParse({
+      ...rawInput,
+      merchantId
+    });
+
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       return {
@@ -17,17 +25,17 @@ export async function handleCreateOrder(
       };
     }
 
-    const currentCatalogue = await storage.getProducts();
+    const currentCatalogue = await storage.getProducts(merchantId);
     const order = createOrder(currentCatalogue, parsed.data);
 
-    await storage.saveOrder(order);
+    await storage.saveOrder(order, merchantId);
 
     for (const item of order.items) {
-      const product = await storage.getProductById(item.productId);
+      const product = await storage.getProductById(item.productId, merchantId);
       if (product) {
         product.stockQuantity = Math.max(0, product.stockQuantity - item.quantity);
         product.updatedAt = new Date().toISOString();
-        await storage.saveProduct(product);
+        await storage.saveProduct(product, merchantId);
       }
     }
 
@@ -35,6 +43,7 @@ export async function handleCreateOrder(
       success: true,
       data: {
         order,
+        merchantId,
         message: `Order ${order.orderId} created successfully for ${order.customerName}. Subtotal: ₦${order.totalNgn.toLocaleString()}. Status: ${order.status}.`
       }
     };
@@ -48,7 +57,8 @@ export async function handleCreateOrder(
 
 export async function handleGetOrder(
   orderId: string,
-  storage: PersistentStorage = defaultStorage
+  storage: PersistentStorage = defaultStorage,
+  merchantIdInput?: string
 ): Promise<ToolResult> {
   try {
     if (!orderId || typeof orderId !== "string") {
@@ -58,7 +68,8 @@ export async function handleGetOrder(
       };
     }
 
-    const order = await storage.getOrderById(orderId);
+    const merchantId = merchantIdInput ? normalizeMerchantId(merchantIdInput) : undefined;
+    const order = await storage.getOrderById(orderId, merchantId);
     if (!order) {
       return {
         success: false,

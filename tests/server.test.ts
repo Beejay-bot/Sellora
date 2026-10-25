@@ -12,6 +12,16 @@ describe("Sellora HTTP & MCP Server", () => {
   beforeAll(async () => {
     delete process.env.CHORD_TOOL_TOKEN;
     const testStorage = new PersistentStorage("", true);
+    await testStorage.saveProduct({
+      productId: "wigs-bone-straight-18-inch",
+      name: "Bone Straight Wig",
+      category: "wigs",
+      priceNgn: 85000,
+      stockQuantity: 5,
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
     server = createServer(testStorage);
     await new Promise<void>((resolve) => {
       server.listen(0, () => {

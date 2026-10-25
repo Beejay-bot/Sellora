@@ -62,8 +62,16 @@ describe("Orders Domain & Tools", () => {
 
   it("decrements stock in storage upon successful order creation", async () => {
     const storage = new PersistentStorage("", true);
-    const initialProducts = await storage.getProducts();
-    const targetProduct = initialProducts[0];
+    const targetProduct = await storage.saveProduct({
+      productId: "wigs-bone-straight-18-inch",
+      name: "Bone Straight Wig",
+      category: "wigs",
+      priceNgn: 85000,
+      stockQuantity: 3,
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
     const initialStock = targetProduct.stockQuantity;
 
     const result = await handleCreateOrder(

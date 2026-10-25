@@ -4,6 +4,7 @@ export const productStatusSchema = z.enum(["active", "archived"]);
 
 export const productSchema = z.object({
   productId: z.string().min(3),
+  merchantId: z.string().optional(),
   name: z.string().min(2),
   category: z.string().min(2),
   description: z.string().trim().min(2).optional(),
@@ -16,6 +17,7 @@ export const productSchema = z.object({
 });
 
 export const upsertProductInputSchema = z.object({
+  merchantId: z.string().optional(),
   name: z.string().min(2),
   category: z.string().min(2).optional().default("beauty"),
   description: z.string().trim().min(2).optional(),

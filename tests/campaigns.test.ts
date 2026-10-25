@@ -59,6 +59,16 @@ describe("Campaigns Domain & Tools", () => {
 
   it("supports unified handleManageCampaign with all three operations", async () => {
     const storage = new PersistentStorage("", true);
+    await storage.saveProduct({
+      productId: "wigs-bone-straight-18-inch",
+      name: "Bone Straight Wig",
+      category: "wigs",
+      priceNgn: 85000,
+      stockQuantity: 3,
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
 
     // 1. get_catalogue
     const catResult = await handleManageCampaign({ action: "get_catalogue" }, storage);

@@ -15,12 +15,14 @@ function buildProductId(input: UpsertProductInput): string {
 
 export function upsertProduct(catalogue: Product[], rawInput: UpsertProductInput, now = new Date()): Product {
   const input = upsertProductInputSchema.parse(rawInput);
+  const merchantId = input.merchantId ?? "default";
   const productId = input.existingProductId ?? buildProductId(input);
   const existing = catalogue.find((product) => product.productId === productId);
   const timestamp = now.toISOString();
 
   const nextProduct: Product = {
     productId,
+    merchantId,
     name: input.name,
     category: input.category,
     description: input.description,

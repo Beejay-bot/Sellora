@@ -1,6 +1,6 @@
 import { upsertProduct } from "../domain/products.js";
 import { upsertProductInputSchema, type UpsertProductInput } from "../schemas/product.js";
-import { defaultStorage, PersistentStorage } from "../services/storage.js";
+import { defaultStorage, normalizeMerchantId, PersistentStorage } from "../services/storage.js";
 
 export interface ToolResult<T = any> {
   success: boolean;
@@ -10,10 +10,18 @@ export interface ToolResult<T = any> {
 
 export async function handleUpsertProduct(
   input: unknown,
-  storage: PersistentStorage = defaultStorage
+  storage: PersistentStorage = defaultStorage,
+  defaultMerchantId?: string
 ): Promise<ToolResult> {
   try {
-    const parsed = upsertProductInputSchema.safeParse(input);
+    const rawInput = typeof input === "object" && input !== null ? input : {};
+    const merchantId = normalizeMerchantId((rawInput as any).merchantId || defaultMerchantId);
+
+    const parsed = upsertProductInputSchema.safeParse({
+      ...rawInput,
+      merchantId
+    });
+
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       return {
@@ -22,15 +30,16 @@ export async function handleUpsertProduct(
       };
     }
 
-    const currentCatalogue = await storage.getProducts();
+    const currentCatalogue = await storage.getProducts(merchantId);
     const product = upsertProduct(currentCatalogue, parsed.data);
-    await storage.saveProduct(product);
+    await storage.saveProduct(product, merchantId);
 
     return {
       success: true,
       data: {
+        merchantId,
         product,
-        message: `Product '${product.name}' (${product.productId}) saved successfully.`
+        message: `Product '${product.name}' (${product.productId}) saved successfully for merchant '${merchantId}'.`
       }
     };
   } catch (err: unknown) {
@@ -42,15 +51,18 @@ export async function handleUpsertProduct(
 }
 
 export async function handleGetCatalogue(
-  storage: PersistentStorage = defaultStorage
+  storage: PersistentStorage = defaultStorage,
+  merchantIdInput?: string
 ): Promise<ToolResult> {
   try {
-    const products = await storage.getProducts();
+    const merchantId = normalizeMerchantId(merchantIdInput);
+    const products = await storage.getProducts(merchantId);
     const activeProducts = products.filter((p) => p.status === "active");
 
     return {
       success: true,
       data: {
+        merchantId,
         total: activeProducts.length,
         products: activeProducts
       }

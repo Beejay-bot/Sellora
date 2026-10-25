@@ -4,51 +4,15 @@ import path from "node:path";
 import type { Campaign } from "../schemas/campaign.js";
 import type { Order } from "../schemas/order.js";
 import type { Product } from "../schemas/product.js";
+import { normalizeMerchantId } from "../lib/utils.js";
+
+export { normalizeMerchantId };
 
 export interface DatabaseState {
   products: Product[];
   campaigns: Campaign[];
   orders: Order[];
 }
-
-export const defaultSeedProducts: Product[] = [
-  {
-    productId: "wigs-bone-straight-18-inch",
-    name: "Bone Straight Wig",
-    category: "wigs",
-    description: "100% human hair, double drawn, silky smooth bone straight wig with HD lace.",
-    variant: "18-inch",
-    priceNgn: 85000,
-    stockQuantity: 3,
-    status: "active",
-    createdAt: "2026-10-19T10:00:00.000Z",
-    updatedAt: "2026-10-19T10:00:00.000Z"
-  },
-  {
-    productId: "wigs-body-wave-22-inch",
-    name: "Body Wave Wig",
-    category: "wigs",
-    description: "Bouncy, soft body wave texture, holds curls effortlessly, pre-plucked hairline.",
-    variant: "22-inch",
-    priceNgn: 95000,
-    stockQuantity: 2,
-    status: "active",
-    createdAt: "2026-10-19T10:00:00.000Z",
-    updatedAt: "2026-10-19T10:00:00.000Z"
-  },
-  {
-    productId: "skincare-radiance-glow-oil-50ml",
-    name: "Radiance Glow Face Oil",
-    category: "skincare",
-    description: "Lightweight, non-comedogenic botanical oil for hydration and radiant complexion.",
-    variant: "50ml",
-    priceNgn: 18500,
-    stockQuantity: 10,
-    status: "active",
-    createdAt: "2026-10-19T10:00:00.000Z",
-    updatedAt: "2026-10-19T10:00:00.000Z"
-  }
-];
 
 export class PersistentStorage {
   private db: DatabaseSync;
@@ -78,90 +42,100 @@ export class PersistentStorage {
     }
 
     this.initSchema();
-    this.ensureSeedData();
   }
 
   private initSchema(): void {
+    // Migration for existing single-tenant products table
+    const productSql = (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='products'").get() as any)?.sql || "";
+    if (productSql && !productSql.includes("merchant_id")) {
+      this.db.exec(`
+        CREATE TABLE products_new (
+          product_id TEXT NOT NULL,
+          merchant_id TEXT NOT NULL DEFAULT 'default',
+          name TEXT NOT NULL,
+          category TEXT NOT NULL,
+          description TEXT,
+          variant TEXT,
+          price_ngn INTEGER NOT NULL,
+          stock_quantity INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (merchant_id, product_id)
+        );
+        INSERT INTO products_new (product_id, merchant_id, name, category, description, variant, price_ngn, stock_quantity, status, created_at, updated_at)
+          SELECT product_id, 'default', name, category, description, variant, price_ngn, stock_quantity, status, created_at, updated_at FROM products;
+        DROP TABLE products;
+        ALTER TABLE products_new RENAME TO products;
+      `);
+    } else {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS products (
+          product_id TEXT NOT NULL,
+          merchant_id TEXT NOT NULL DEFAULT 'default',
+          name TEXT NOT NULL,
+          category TEXT NOT NULL,
+          description TEXT,
+          variant TEXT,
+          price_ngn INTEGER NOT NULL,
+          stock_quantity INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (merchant_id, product_id)
+        );
+      `);
+    }
+
+    const campaignSql = (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='campaigns'").get() as any)?.sql || "";
+    if (campaignSql && !campaignSql.includes("merchant_id")) {
+      this.db.exec("ALTER TABLE campaigns ADD COLUMN merchant_id TEXT NOT NULL DEFAULT 'default';");
+    } else {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS campaigns (
+          campaign_id TEXT PRIMARY KEY,
+          merchant_id TEXT NOT NULL DEFAULT 'default',
+          campaign_date TEXT NOT NULL,
+          product_ids TEXT NOT NULL,
+          generated_caption TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+      `);
+    }
+
+    const orderSql = (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").get() as any)?.sql || "";
+    if (orderSql && !orderSql.includes("merchant_id")) {
+      this.db.exec("ALTER TABLE orders ADD COLUMN merchant_id TEXT NOT NULL DEFAULT 'default';");
+    } else {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS orders (
+          order_id TEXT PRIMARY KEY,
+          merchant_id TEXT NOT NULL DEFAULT 'default',
+          customer_name TEXT NOT NULL,
+          customer_phone TEXT NOT NULL,
+          items TEXT NOT NULL,
+          subtotal_ngn INTEGER NOT NULL,
+          total_ngn INTEGER NOT NULL,
+          payment_status TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    }
+
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS products (
-        product_id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        description TEXT,
-        variant TEXT,
-        price_ngn INTEGER NOT NULL,
-        stock_quantity INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS campaigns (
-        campaign_id TEXT PRIMARY KEY,
-        campaign_date TEXT NOT NULL,
-        product_ids TEXT NOT NULL,
-        generated_caption TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS orders (
-        order_id TEXT PRIMARY KEY,
-        customer_name TEXT NOT NULL,
-        customer_phone TEXT NOT NULL,
-        items TEXT NOT NULL,
-        subtotal_ngn INTEGER NOT NULL,
-        total_ngn INTEGER NOT NULL,
-        payment_status TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
+      CREATE INDEX IF NOT EXISTS idx_products_merchant ON products(merchant_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders(merchant_id);
+      CREATE INDEX IF NOT EXISTS idx_campaigns_merchant ON campaigns(merchant_id);
     `);
-  }
-
-  private ensureSeedData(): void {
-    const row = this.db.prepare("SELECT count(*) as count FROM products").get() as { count: number };
-    if (row.count > 0) {
-      return;
-    }
-
-    // Check if legacy JSON file exists to migrate products
-    const jsonPath = path.resolve("./data/sellora.json");
-    if (!this.isMemoryOnly && fs.existsSync(jsonPath)) {
-      try {
-        const content = fs.readFileSync(jsonPath, "utf-8");
-        const parsed = JSON.parse(content) as DatabaseState;
-        if (parsed.products && Array.isArray(parsed.products) && parsed.products.length > 0) {
-          for (const p of parsed.products) {
-            this.saveProductSync(p);
-          }
-          if (parsed.campaigns && Array.isArray(parsed.campaigns)) {
-            for (const c of parsed.campaigns) {
-              this.saveCampaignSync(c);
-            }
-          }
-          if (parsed.orders && Array.isArray(parsed.orders)) {
-            for (const o of parsed.orders) {
-              this.saveOrderSync(o);
-            }
-          }
-          return;
-        }
-      } catch (err) {
-        console.warn("Could not migrate from data/sellora.json:", err);
-      }
-    }
-
-    // Otherwise, seed default initial products
-    for (const product of defaultSeedProducts) {
-      this.saveProductSync(product);
-    }
   }
 
   private mapProduct(row: any): Product {
     return {
       productId: row.product_id,
+      merchantId: row.merchant_id || "default",
       name: row.name,
       category: row.category,
       description: row.description || undefined,
@@ -177,6 +151,7 @@ export class PersistentStorage {
   private mapCampaign(row: any): Campaign {
     return {
       campaignId: row.campaign_id,
+      merchantId: row.merchant_id || "default",
       campaignDate: row.campaign_date,
       productIds: JSON.parse(row.product_ids),
       generatedCaption: row.generated_caption,
@@ -188,6 +163,7 @@ export class PersistentStorage {
   private mapOrder(row: any): Order {
     return {
       orderId: row.order_id,
+      merchantId: row.merchant_id || "default",
       customerName: row.customer_name,
       customerPhone: row.customer_phone,
       items: JSON.parse(row.items),
@@ -200,13 +176,14 @@ export class PersistentStorage {
     };
   }
 
-  private saveProductSync(product: Product): Product {
+  private saveProductSync(product: Product, merchantId?: string): Product {
+    const mId = normalizeMerchantId(merchantId || product.merchantId);
     const stmt = this.db.prepare(`
       INSERT INTO products (
-        product_id, name, category, description, variant,
+        product_id, merchant_id, name, category, description, variant,
         price_ngn, stock_quantity, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(product_id) DO UPDATE SET
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(merchant_id, product_id) DO UPDATE SET
         name = excluded.name,
         category = excluded.category,
         description = excluded.description,
@@ -219,6 +196,7 @@ export class PersistentStorage {
 
     stmt.run(
       product.productId,
+      mId,
       product.name,
       product.category,
       product.description ?? null,
@@ -230,15 +208,17 @@ export class PersistentStorage {
       product.updatedAt
     );
 
-    return product;
+    return { ...product, merchantId: mId };
   }
 
-  private saveCampaignSync(campaign: Campaign): Campaign {
+  private saveCampaignSync(campaign: Campaign, merchantId?: string): Campaign {
+    const mId = normalizeMerchantId(merchantId || campaign.merchantId);
     const stmt = this.db.prepare(`
       INSERT INTO campaigns (
-        campaign_id, campaign_date, product_ids, generated_caption, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        campaign_id, merchant_id, campaign_date, product_ids, generated_caption, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(campaign_id) DO UPDATE SET
+        merchant_id = excluded.merchant_id,
         campaign_date = excluded.campaign_date,
         product_ids = excluded.product_ids,
         generated_caption = excluded.generated_caption,
@@ -247,6 +227,7 @@ export class PersistentStorage {
 
     stmt.run(
       campaign.campaignId,
+      mId,
       campaign.campaignDate,
       JSON.stringify(campaign.productIds),
       campaign.generatedCaption,
@@ -254,16 +235,18 @@ export class PersistentStorage {
       campaign.createdAt
     );
 
-    return campaign;
+    return { ...campaign, merchantId: mId };
   }
 
-  private saveOrderSync(order: Order): Order {
+  private saveOrderSync(order: Order, merchantId?: string): Order {
+    const mId = normalizeMerchantId(merchantId || order.merchantId);
     const stmt = this.db.prepare(`
       INSERT INTO orders (
-        order_id, customer_name, customer_phone, items,
+        order_id, merchant_id, customer_name, customer_phone, items,
         subtotal_ngn, total_ngn, payment_status, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(order_id) DO UPDATE SET
+        merchant_id = excluded.merchant_id,
         customer_name = excluded.customer_name,
         customer_phone = excluded.customer_phone,
         items = excluded.items,
@@ -276,6 +259,7 @@ export class PersistentStorage {
 
     stmt.run(
       order.orderId,
+      mId,
       order.customerName,
       order.customerPhone,
       JSON.stringify(order.items),
@@ -287,44 +271,53 @@ export class PersistentStorage {
       order.updatedAt
     );
 
-    return order;
+    return { ...order, merchantId: mId };
   }
 
-  async getProducts(): Promise<Product[]> {
-    const rows = this.db.prepare("SELECT * FROM products ORDER BY rowid ASC").all();
+  async getProducts(merchantId: string = "default"): Promise<Product[]> {
+    const mId = normalizeMerchantId(merchantId);
+    const rows = this.db.prepare("SELECT * FROM products WHERE merchant_id = ? ORDER BY rowid ASC").all(mId);
     return rows.map((r) => this.mapProduct(r));
   }
 
-  async getProductById(productId: string): Promise<Product | undefined> {
-    const row = this.db.prepare("SELECT * FROM products WHERE product_id = ?").get(productId);
+  async getProductById(productId: string, merchantId: string = "default"): Promise<Product | undefined> {
+    const mId = normalizeMerchantId(merchantId);
+    const row = this.db.prepare("SELECT * FROM products WHERE merchant_id = ? AND product_id = ?").get(mId, productId);
     return row ? this.mapProduct(row) : undefined;
   }
 
-  async saveProduct(product: Product): Promise<Product> {
-    return this.saveProductSync(product);
+  async saveProduct(product: Product, merchantId?: string): Promise<Product> {
+    return this.saveProductSync(product, merchantId);
   }
 
-  async getCampaigns(): Promise<Campaign[]> {
-    const rows = this.db.prepare("SELECT * FROM campaigns ORDER BY rowid ASC").all();
+  async getCampaigns(merchantId: string = "default"): Promise<Campaign[]> {
+    const mId = normalizeMerchantId(merchantId);
+    const rows = this.db.prepare("SELECT * FROM campaigns WHERE merchant_id = ? ORDER BY rowid ASC").all(mId);
     return rows.map((r) => this.mapCampaign(r));
   }
 
-  async saveCampaign(campaign: Campaign): Promise<Campaign> {
-    return this.saveCampaignSync(campaign);
+  async saveCampaign(campaign: Campaign, merchantId?: string): Promise<Campaign> {
+    return this.saveCampaignSync(campaign, merchantId);
   }
 
-  async getOrders(): Promise<Order[]> {
-    const rows = this.db.prepare("SELECT * FROM orders ORDER BY rowid ASC").all();
+  async getOrders(merchantId: string = "default"): Promise<Order[]> {
+    const mId = normalizeMerchantId(merchantId);
+    const rows = this.db.prepare("SELECT * FROM orders WHERE merchant_id = ? ORDER BY rowid ASC").all(mId);
     return rows.map((r) => this.mapOrder(r));
   }
 
-  async getOrderById(orderId: string): Promise<Order | undefined> {
+  async getOrderById(orderId: string, merchantId?: string): Promise<Order | undefined> {
+    if (merchantId) {
+      const mId = normalizeMerchantId(merchantId);
+      const row = this.db.prepare("SELECT * FROM orders WHERE order_id = ? AND merchant_id = ?").get(orderId, mId);
+      return row ? this.mapOrder(row) : undefined;
+    }
     const row = this.db.prepare("SELECT * FROM orders WHERE order_id = ?").get(orderId);
     return row ? this.mapOrder(row) : undefined;
   }
 
-  async saveOrder(order: Order): Promise<Order> {
-    return this.saveOrderSync(order);
+  async saveOrder(order: Order, merchantId?: string): Promise<Order> {
+    return this.saveOrderSync(order, merchantId);
   }
 
   async reset(state?: Partial<DatabaseState>): Promise<void> {
@@ -332,23 +325,19 @@ export class PersistentStorage {
 
     if (state?.products && state.products.length > 0) {
       for (const p of state.products) {
-        this.saveProductSync(p);
-      }
-    } else {
-      for (const p of defaultSeedProducts) {
-        this.saveProductSync(p);
+        this.saveProductSync(p, p.merchantId || "default");
       }
     }
 
     if (state?.campaigns) {
       for (const c of state.campaigns) {
-        this.saveCampaignSync(c);
+        this.saveCampaignSync(c, c.merchantId || "default");
       }
     }
 
     if (state?.orders) {
       for (const o of state.orders) {
-        this.saveOrderSync(o);
+        this.saveOrderSync(o, o.merchantId || "default");
       }
     }
   }

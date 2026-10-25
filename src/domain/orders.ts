@@ -7,6 +7,7 @@ function buildOrderId(now: Date): string {
 
 export function createOrder(catalogue: Product[], rawInput: CreateOrderInput, now = new Date()): Order {
   const input = createOrderInputSchema.parse(rawInput);
+  const merchantId = input.merchantId ?? "default";
 
   const items = input.lines.map((line) => {
     const product = catalogue.find((entry) => entry.productId === line.productId && entry.status === "active");
@@ -34,6 +35,7 @@ export function createOrder(catalogue: Product[], rawInput: CreateOrderInput, no
 
   return orderSchema.parse({
     orderId: buildOrderId(now),
+    merchantId,
     customerName: input.customerName,
     customerPhone: input.customerPhone,
     items,

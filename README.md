@@ -110,7 +110,7 @@ Authentication: All tool calls require `Authorization: Bearer <token>` or `X-API
 
 ## 5. Automated Tests
 
-Sellora includes 31 automated tests covering schemas, business domain logic, SQLite transactions, tool endpoints, and Paystack integration:
+Sellora includes 35 automated tests covering multi-tenant merchant isolation, schemas, business domain logic, SQLite transactions, tool endpoints, and Paystack integration:
 
 ```bash
 # Run tests

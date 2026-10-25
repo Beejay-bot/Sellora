@@ -87,6 +87,13 @@ describe("Products Domain & Tools", () => {
 
   it("retrieves active products via handleGetCatalogue", async () => {
     const storage = new PersistentStorage("", true);
+    await handleUpsertProduct({
+      name: "Bone Straight Wig",
+      category: "wigs",
+      priceNgn: 85000,
+      stockQuantity: 3
+    }, storage);
+
     const result = await handleGetCatalogue(storage);
 
     expect(result.success).toBe(true);

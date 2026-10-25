@@ -79,6 +79,7 @@ export function saveCampaign(
   now = new Date()
 ): Campaign {
   const input = saveCampaignInputSchema.parse(rawInput);
+  const merchantId = input.merchantId ?? "default";
 
   // Validate all referenced product IDs exist in active catalogue
   for (const productId of input.productIds) {
@@ -93,6 +94,7 @@ export function saveCampaign(
 
   return campaignSchema.parse({
     campaignId,
+    merchantId,
     campaignDate,
     productIds: input.productIds,
     generatedCaption: input.generatedCaption,
