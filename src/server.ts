@@ -491,9 +491,9 @@ export function createServer(storage: PersistentStorage = defaultStorage) {
 // Start server if executed directly
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
   const server = createServer();
-  server.listen(PORT, () => {
-    console.log(`Sellora Server running on http://localhost:${PORT}`);
-    console.log(`Tool Discovery: http://localhost:${PORT}/tools`);
-    console.log(`MCP JSON-RPC: http://localhost:${PORT}/mcp`);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`Sellora Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Tool Discovery: http://0.0.0.0:${PORT}/tools`);
+    console.log(`MCP JSON-RPC: http://0.0.0.0:${PORT}/mcp`);
   });
 }
